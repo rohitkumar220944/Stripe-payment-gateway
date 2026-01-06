@@ -8,6 +8,7 @@ import PaymentMethodSelector from "./payment-method-selector"
 import PaymentForm from "./payment-form"
 import OrderSummary from "./order-summary"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { AlertCircle } from "lucide-react"
 
 export default function PaymentPage() {
@@ -56,6 +57,8 @@ function PaymentPageContent() {
   const [selectedMethod, setSelectedMethod] = useState("card")
   const [cardHolder, setCardHolder] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [isSuccessDialogOpen, setIsSuccessDialogOpen] = useState(false)
   const [statusMessage, setStatusMessage] = useState<{
     type: "success" | "error"
     text: string
@@ -63,8 +66,8 @@ function PaymentPageContent() {
 
   const items = useMemo(
     () => [
-      { name: "Product 1", quantity: 1, price: 15000 },
-      { name: "Product 2", quantity: 1, price: 15499 },
+      { name: "Product 1", quantity: 1, price: 600 },
+      { name: "Product 2", quantity: 1, price: 500 },
     ],
     []
   )
@@ -73,6 +76,13 @@ function PaymentPageContent() {
   const subtotal = useMemo(() => items.reduce((sum, item) => sum + item.price * item.quantity, 0), [items])
   const total = subtotal + protectFee - discount
   const API_BASE = process.env.NEXT_PUBLIC_PAYMENTS_API || "http://localhost:8081"
+
+  const handleMethodSelect = (method: string) => {
+    setSelectedMethod(method)
+    if (method === "card") {
+      setIsDialogOpen(true)
+    }
+  }
 
   const handlePayment = async () => {
     if (!stripe || !elements) {
@@ -119,6 +129,8 @@ function PaymentPageContent() {
           paymentMethod: "card",
           paymentMethodId: pmResult.paymentMethod.id,
           cardHolder,
+          customerEmail: undefined, // Optional: set if you collect email in your UI
+          // Tip: backend can use cardHolder + customerEmail to create a unique Stripe Customer
           description: "E-commerce order payment",
         }),
       })
@@ -146,18 +158,22 @@ function PaymentPageContent() {
       const data = await response.json()
 
       if (data.status === "succeeded" || data.paymentStatus === "succeeded") {
-        setStatusMessage({ type: "success", text: "Payment successful! Your order has been placed." })
         cardElement.clear()
         setCardHolder("")
+        setIsDialogOpen(false)
+        setIsSuccessDialogOpen(true)
+        setStatusMessage(null)
       } else if (data.status === "requires_action" && data.clientSecret) {
         const result = await stripe.confirmCardPayment(data.clientSecret)
 
         if (result.error) {
           setStatusMessage({ type: "error", text: result.error.message || "Payment authentication failed." })
         } else if (result.paymentIntent?.status === "succeeded") {
-          setStatusMessage({ type: "success", text: "Payment successful! Your order has been placed." })
           cardElement.clear()
           setCardHolder("")
+          setIsDialogOpen(false)
+          setIsSuccessDialogOpen(true)
+          setStatusMessage(null)
         }
       } else if (data.error) {
         throw new Error(data.error)
@@ -175,10 +191,33 @@ function PaymentPageContent() {
   }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-      <div className="lg:col-span-2 space-y-6">
-        <PaymentMethodSelector selectedMethod={selectedMethod} onSelectMethod={setSelectedMethod} />
-        {selectedMethod === "card" && (
+    <>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="lg:col-span-2 space-y-6">
+          <PaymentMethodSelector selectedMethod={selectedMethod} onSelectMethod={handleMethodSelect} />
+        </div>
+
+        <div>
+          <OrderSummary
+            items={items}
+            subtotal={subtotal}
+            protectFee={protectFee}
+            discount={discount}
+            total={total}
+            onPayment={handlePayment}
+            isLoading={isSubmitting || !stripe}
+          />
+        </div>
+      </div>
+
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold">Enter Card Details</DialogTitle>
+            <DialogDescription>
+              Complete your payment securely. All transactions are encrypted and secure.
+            </DialogDescription>
+          </DialogHeader>
           <PaymentForm
             cardHolder={cardHolder}
             onCardHolderChange={setCardHolder}
@@ -187,20 +226,30 @@ function PaymentPageContent() {
             statusMessage={statusMessage || undefined}
             payAmount={total}
           />
-        )}
-      </div>
+        </DialogContent>
+      </Dialog>
 
-      <div>
-        <OrderSummary
-          items={items}
-          subtotal={subtotal}
-          protectFee={protectFee}
-          discount={discount}
-          total={total}
-          onPayment={handlePayment}
-          isLoading={isSubmitting || !stripe}
-        />
-      </div>
-    </div>
+      <Dialog open={isSuccessDialogOpen} onOpenChange={setIsSuccessDialogOpen}>
+        <DialogContent className="sm:max-w-[450px]">
+          <div className="text-center py-6">
+            <div className="mx-auto w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
+              <svg className="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <DialogTitle className="text-2xl font-bold text-gray-900 mb-2">Payment Successful!</DialogTitle>
+            <DialogDescription className="text-base text-gray-600">
+              Your order has been placed successfully. You will receive a confirmation email shortly.
+            </DialogDescription>
+            <button
+              onClick={() => setIsSuccessDialogOpen(false)}
+              className="mt-6 w-full bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white font-semibold py-3 rounded-lg transition-all duration-200 shadow-lg hover:shadow-xl"
+            >
+              Continue Shopping
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }

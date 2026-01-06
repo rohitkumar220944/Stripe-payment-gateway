@@ -94,6 +94,7 @@ public class PaymentRequest {
     private Integer expYear;       // 2026
     private String cvc;            // "123"
     private String description;    // "E-commerce order payment"
+    private String customerEmail;  // Optional: used to identify the Stripe Customer uniquely
     
     // Getters and setters...
 }
@@ -121,3 +122,51 @@ Payment should now succeed! 🎉
 ## Why this fixes the "automatic_payment_methods" error
 
 Stripe requires either `automatic_payment_methods.enabled = true` or an explicit `payment_method_types` list. Because we disable automatic methods, we now set `payment_method_types` to `card` so the intent is valid and the error goes away.
+
+## Use Dynamic Customer Name (fixes all customers showing as "Radha")
+
+If your dashboard shows the same customer name (e.g., "Radha") for every payment, your backend is likely creating or reusing a static Stripe `Customer` and attaching it to every `PaymentIntent`.
+
+To fix this:
+
+1. Create or reuse a `Customer` using the real buyer details (name/email)
+2. Attach that `customer` to the `PaymentIntent`
+
+Example update:
+
+```java
+// Before creating PaymentIntent
+Customer customer = null;
+if (request.getCustomerEmail() != null && !request.getCustomerEmail().isEmpty()) {
+    // Try to find existing customer by email (optional; list and match)
+    Map<String, Object> listParams = new HashMap<>();
+    listParams.put("email", request.getCustomerEmail());
+    CustomerCollection customers = Customer.list(listParams);
+    if (customers != null && customers.getData() != null && !customers.getData().isEmpty()) {
+        customer = customers.getData().get(0);
+    }
+}
+
+if (customer == null) {
+    Map<String, Object> customerParams = new HashMap<>();
+    if (request.getCardHolder() != null) customerParams.put("name", request.getCardHolder());
+    if (request.getCustomerEmail() != null) customerParams.put("email", request.getCustomerEmail());
+    customer = Customer.create(customerParams);
+}
+
+// When building PaymentIntent params
+paymentIntentParams.put("customer", customer.getId());
+```
+
+Notes:
+- If you don't want to manage customers, simply remove any hard-coded `customer` assignment. Stripe will still show `billing_details.name` (from `cardHolder`) on the payment.
+- The frontend already sends `cardHolder`; you can additionally accept `customerEmail` and pass it along to uniquely identify customers.
+
+### Minimal Backend Change
+
+Ensure there is no static value like:
+```java
+paymentIntentParams.put("customer", "cus_static_radha");
+```
+Replace it with the dynamic logic above or remove it to rely on `billing_details.name`.
+
